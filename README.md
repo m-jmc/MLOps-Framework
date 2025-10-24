@@ -1,4 +1,4 @@
-# MLOps Framework - Educational Reference
+# MLOps Framework - Reference
 
 > A simplified, educational MLOps platform demonstrating production ML patterns through clear examples and narrative explanations.
 
