@@ -33,11 +33,10 @@ The code is structured as a teaching tool. Start here:
 
 1. [README.md](README.md) - Overview (you are here)
 2. [ARCHITECTURE.md](docs/ARCHITECTURE.md) - System design and data flow
-3. [CICD_AND_PRECOMMIT.md](CICD_AND_PRECOMMIT.md) - Testing and automation concepts
-4. [train.py](src/models/heart_disease/train.py) - Training pipeline walkthrough
-5. [inference.py](src/models/heart_disease/inference.py) - Prediction pipeline
-6. [mlflow_utils.py](src/utils/mlflow_utils.py) - Model lifecycle management
-7. [drift_detector.py](src/monitoring/drift_detector.py) - Model monitoring
+3. [train.py](src/models/heart_disease/train.py) - Training pipeline walkthrough
+4. [inference.py](src/models/heart_disease/inference.py) - Prediction pipeline
+5. [mlflow_utils.py](src/utils/mlflow_utils.py) - Model lifecycle management
+6. [drift_detector.py](src/monitoring/drift_detector.py) - Model monitoring
 
 ## Repository Structure
 
@@ -61,7 +60,6 @@ MLOps-Framework/
 │   └── ARCHITECTURE.md            # System design
 ├── config.yaml                    # Central configuration
 ├── Dockerfile                     # Cloud deployment
-└── CICD_AND_PRECOMMIT.md         # Testing & automation
 ```
 
 ## Core Concepts Demonstrated
