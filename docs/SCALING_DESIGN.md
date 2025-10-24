@@ -55,7 +55,7 @@ Model Registry Structure:
 
 ### Promotion Workflow
 
-Models progress through stages using **aliases** (not stages, which are deprecated):
+Models progress through stages using **aliases** :
 
 ```
 Training → Staging → Challenger → Champion → Archived
@@ -299,7 +299,7 @@ def predict(model_name: str, data: dict):
 
 **Decision**: Start with Option 1 (isolation), migrate high-traffic models to Option 2 when cost becomes issue.
 
-### Orchestration: Airflow vs Kubeflow
+### Orchestration: Airflow vs Kubeflow vs Github Actions
 
 | Tool | Use Case | Pros | Cons | Our Choice |
 |------|----------|------|------|------------|
@@ -427,13 +427,11 @@ Data Pipeline: ETL_job_20240114 (Airflow DAG)
 - Multi-tenant K8s (namespace per team)
 - Automated approval workflow
 - Real-time drift detection (streaming)
-- Feature store caching (Redis)
+- Feature store
 
 ### Phase 3: 50-100+ Models (12-18 months)
 - Multi-region deployment (US-East, US-West)
-- A/B testing framework (Istio traffic splitting)
-- AutoML for model optimization
-- Federated learning for sensitive data
+- A/B testing framework (traffic splitting)
 
 ## Key Takeaways
 
