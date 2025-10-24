@@ -1,4 +1,4 @@
-# MLOps Architecture - Educational Guide
+# MLOps Architecture - Framework Guide
 
 This document explains how the MLOps components work together to create a production ML system.
 
