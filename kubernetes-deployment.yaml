@@ -1,0 +1,698 @@
+# Kubernetes Deployment for MLOps Framework
+# This demonstrates orchestrating a complete ML platform with microservices
+#
+# Architecture:
+#   - PostgreSQL: Shared database for MLflow metadata and application data
+#   - MLflow Server: Model registry and experiment tracking UI
+#   - FEAST Feature Store: Online feature serving for real-time inference
+#   - Inference API: Model serving with REST endpoints
+#   - Dashboard: Streamlit monitoring and analytics UI
+#
+# Key Kubernetes Concepts:
+#   - Deployments: Manage replicated application pods
+#   - Services: Expose applications with stable networking
+#   - ConfigMaps: Store configuration separately from code
+#   - Secrets: Securely store sensitive data (passwords, API keys)
+#   - PersistentVolumes: Provide durable storage for stateful services
+
+---
+# ============================================================================
+# Namespace: Isolate MLOps resources from other applications
+# ============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: mlops
+  labels:
+    app: mlops-platform
+    environment: production
+
+---
+# ============================================================================
+# ConfigMap: Centralized configuration for all services
+# ============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlops-config
+  namespace: mlops
+data:
+  # Database connection settings
+  POSTGRES_HOST: "postgres-service"
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: "mlops"
+
+  # MLflow settings
+  MLFLOW_BACKEND_STORE_URI: "postgresql://mlflow:password@postgres-service:5432/mlops"
+  MLFLOW_ARTIFACT_ROOT: "s3://mlflow-artifacts"  # Or Azure Blob, GCS
+  MLFLOW_TRACKING_URI: "http://mlflow-service:5000"
+
+  # FEAST settings
+  FEAST_REGISTRY_PATH: "s3://feast-registry/registry.db"
+  FEAST_ONLINE_STORE: "redis://redis-service:6379"
+
+  # Application settings
+  LOG_LEVEL: "INFO"
+  MODEL_REFRESH_INTERVAL: "300"  # Seconds
+
+---
+# ============================================================================
+# Secret: Sensitive credentials (base64 encoded in practice)
+# ============================================================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: mlops-secrets
+  namespace: mlops
+type: Opaque
+data:
+  # In production, use: echo -n 'password' | base64
+  # For demonstration, these are plaintext (NOT SECURE)
+  postgres-password: cGFzc3dvcmQ=  # 'password' base64 encoded
+  mlflow-password: cGFzc3dvcmQ=
+  aws-access-key: WU9VUl9BV1NfS0VZ
+  aws-secret-key: WU9VUl9BV1NfU0VDUkVU
+
+---
+# ============================================================================
+# PostgreSQL Database: Stores MLflow metadata and application data
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: mlops
+  labels:
+    app: postgres
+    tier: database
+spec:
+  replicas: 1  # Single instance (use StatefulSet for HA in production)
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+        tier: database
+    spec:
+      containers:
+      - name: postgres
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+          name: postgres
+        env:
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: POSTGRES_DB
+        - name: POSTGRES_USER
+          value: mlflow
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: mlops-secrets
+              key: postgres-password
+        # Persistent storage for database
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+        # Resource limits prevent one service from consuming all cluster resources
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+      volumes:
+      - name: postgres-storage
+        persistentVolumeClaim:
+          claimName: postgres-pvc
+
+---
+# PersistentVolumeClaim: Request durable storage for PostgreSQL
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+  namespace: mlops
+spec:
+  accessModes:
+    - ReadWriteOnce  # Single node read/write
+  resources:
+    requests:
+      storage: 10Gi  # 10GB for metadata storage
+  # storageClassName: fast-ssd  # Uncomment for specific storage class
+
+---
+# Service: Expose PostgreSQL within cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres-service
+  namespace: mlops
+spec:
+  type: ClusterIP  # Internal only (not exposed to internet)
+  selector:
+    app: postgres
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+
+---
+# ============================================================================
+# MLflow Server: Model registry and experiment tracking
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow
+  namespace: mlops
+  labels:
+    app: mlflow
+    tier: backend
+spec:
+  replicas: 2  # Multiple replicas for high availability
+  selector:
+    matchLabels:
+      app: mlflow
+  template:
+    metadata:
+      labels:
+        app: mlflow
+        tier: backend
+    spec:
+      containers:
+      - name: mlflow
+        image: mlops-framework:latest  # Your custom image from Dockerfile
+        command: ["mlflow", "server"]
+        args:
+          - "--backend-store-uri"
+          - "$(MLFLOW_BACKEND_STORE_URI)"
+          - "--default-artifact-root"
+          - "$(MLFLOW_ARTIFACT_ROOT)"
+          - "--host"
+          - "0.0.0.0"
+          - "--port"
+          - "5000"
+        ports:
+        - containerPort: 5000
+          name: http
+        env:
+        - name: MLFLOW_BACKEND_STORE_URI
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: MLFLOW_BACKEND_STORE_URI
+        - name: MLFLOW_ARTIFACT_ROOT
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: MLFLOW_ARTIFACT_ROOT
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: mlops-secrets
+              key: aws-access-key
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: mlops-secrets
+              key: aws-secret-key
+        # Readiness probe: Wait for MLflow to start before routing traffic
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        # Liveness probe: Restart if MLflow becomes unresponsive
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 5000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+---
+# Service: Expose MLflow UI
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-service
+  namespace: mlops
+spec:
+  type: LoadBalancer  # Expose to internet (or use Ingress for better control)
+  selector:
+    app: mlflow
+  ports:
+  - port: 5000
+    targetPort: 5000
+    protocol: TCP
+
+---
+# ============================================================================
+# FEAST Feature Store: Real-time feature serving
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: feast
+  namespace: mlops
+  labels:
+    app: feast
+    tier: backend
+spec:
+  replicas: 3  # Scale for high-throughput inference
+  selector:
+    matchLabels:
+      app: feast
+  template:
+    metadata:
+      labels:
+        app: feast
+        tier: backend
+    spec:
+      containers:
+      - name: feast
+        image: mlops-framework:latest
+        command: ["feast", "serve"]
+        args:
+          - "--host"
+          - "0.0.0.0"
+          - "--port"
+          - "6566"
+        ports:
+        - containerPort: 6566
+          name: grpc
+        env:
+        - name: FEAST_REGISTRY_PATH
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: FEAST_REGISTRY_PATH
+        - name: FEAST_ONLINE_STORE
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: FEAST_ONLINE_STORE
+        # FEAST uses gRPC health checks
+        readinessProbe:
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:6566"]
+          initialDelaySeconds: 5
+          periodSeconds: 5
+        livenessProbe:
+          exec:
+            command: ["/bin/grpc_health_probe", "-addr=:6566"]
+          initialDelaySeconds: 10
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+# Service: Expose FEAST feature server
+apiVersion: v1
+kind: Service
+metadata:
+  name: feast-service
+  namespace: mlops
+spec:
+  type: ClusterIP  # Internal only (used by inference service)
+  selector:
+    app: feast
+  ports:
+  - port: 6566
+    targetPort: 6566
+    protocol: TCP
+
+---
+# ============================================================================
+# Inference API: Model serving with REST endpoints
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-api
+  namespace: mlops
+  labels:
+    app: inference-api
+    tier: frontend
+spec:
+  replicas: 5  # Scale based on traffic (use HorizontalPodAutoscaler)
+  selector:
+    matchLabels:
+      app: inference-api
+  template:
+    metadata:
+      labels:
+        app: inference-api
+        tier: frontend
+    spec:
+      containers:
+      - name: inference-api
+        image: mlops-framework:latest
+        command: ["uvicorn", "src.api.main:app"]
+        args:
+          - "--host"
+          - "0.0.0.0"
+          - "--port"
+          - "8000"
+        ports:
+        - containerPort: 8000
+          name: http
+        env:
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: MLFLOW_TRACKING_URI
+        - name: FEAST_SERVER
+          value: "feast-service:6566"
+        - name: MODEL_REFRESH_INTERVAL
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: MODEL_REFRESH_INTERVAL
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+
+---
+# Service: Expose inference API
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-service
+  namespace: mlops
+spec:
+  type: LoadBalancer
+  selector:
+    app: inference-api
+  ports:
+  - port: 8000
+    targetPort: 8000
+    protocol: TCP
+
+---
+# HorizontalPodAutoscaler: Auto-scale inference API based on CPU
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inference-api-hpa
+  namespace: mlops
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: inference-api
+  minReplicas: 2
+  maxReplicas: 20
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70  # Scale up when CPU > 70%
+
+---
+# ============================================================================
+# Dashboard: Streamlit monitoring and analytics
+# ============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dashboard
+  namespace: mlops
+  labels:
+    app: dashboard
+    tier: frontend
+spec:
+  replicas: 1  # Dashboard typically doesn't need multiple replicas
+  selector:
+    matchLabels:
+      app: dashboard
+  template:
+    metadata:
+      labels:
+        app: dashboard
+        tier: frontend
+    spec:
+      containers:
+      - name: dashboard
+        image: mlops-framework:latest
+        command: ["streamlit", "run", "src/dashboard/app.py"]
+        args:
+          - "--server.port=8501"
+          - "--server.address=0.0.0.0"
+        ports:
+        - containerPort: 8501
+          name: http
+        env:
+        - name: MLFLOW_TRACKING_URI
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: MLFLOW_TRACKING_URI
+        - name: POSTGRES_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: mlops-config
+              key: POSTGRES_HOST
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 8501
+          initialDelaySeconds: 15
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 8501
+          initialDelaySeconds: 30
+          periodSeconds: 15
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+
+---
+# Service: Expose dashboard
+apiVersion: v1
+kind: Service
+metadata:
+  name: dashboard-service
+  namespace: mlops
+spec:
+  type: LoadBalancer
+  selector:
+    app: dashboard
+  ports:
+  - port: 8501
+    targetPort: 8501
+    protocol: TCP
+
+---
+# ============================================================================
+# Ingress: Single entry point with path-based routing (optional)
+# ============================================================================
+# Instead of multiple LoadBalancers, use Ingress for better control
+# Requires Ingress Controller (nginx, traefik, etc.)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: mlops-ingress
+  namespace: mlops
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"  # Auto SSL
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: mlops.example.com
+    http:
+      paths:
+      # MLflow UI
+      - path: /mlflow
+        pathType: Prefix
+        backend:
+          service:
+            name: mlflow-service
+            port:
+              number: 5000
+      # Inference API
+      - path: /api
+        pathType: Prefix
+        backend:
+          service:
+            name: inference-service
+            port:
+              number: 8000
+      # Dashboard
+      - path: /dashboard
+        pathType: Prefix
+        backend:
+          service:
+            name: dashboard-service
+            port:
+              number: 8501
+  tls:
+  - hosts:
+    - mlops.example.com
+    secretName: mlops-tls
+
+---
+# ============================================================================
+# CronJob: Scheduled model training (weekly)
+# ============================================================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: model-training
+  namespace: mlops
+spec:
+  # Run every Sunday at 2 AM
+  schedule: "0 2 * * 0"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: trainer
+            image: mlops-framework:latest
+            command: ["python", "src/models/heart_disease/train.py"]
+            env:
+            - name: MLFLOW_TRACKING_URI
+              valueFrom:
+                configMapKeyRef:
+                  name: mlops-config
+                  key: MLFLOW_TRACKING_URI
+            resources:
+              requests:
+                memory: "2Gi"
+                cpu: "2000m"
+              limits:
+                memory: "4Gi"
+                cpu: "4000m"
+          restartPolicy: OnFailure
+      # Keep last 3 successful and 1 failed job for debugging
+      successfulJobsHistoryLimit: 3
+      failedJobsHistoryLimit: 1
+
+---
+# ============================================================================
+# Deployment Instructions
+# ============================================================================
+#
+# 1. Create namespace and apply configurations:
+#    kubectl apply -f kubernetes-deployment.yaml
+#
+# 2. Verify all pods are running:
+#    kubectl get pods -n mlops
+#
+# 3. Check service endpoints:
+#    kubectl get services -n mlops
+#
+# 4. View logs for debugging:
+#    kubectl logs -n mlops deployment/mlflow
+#    kubectl logs -n mlops deployment/inference-api
+#
+# 5. Access services:
+#    kubectl get svc -n mlops mlflow-service  # Get external IP
+#    Open: http://<EXTERNAL_IP>:5000
+#
+# 6. Scale deployments manually:
+#    kubectl scale deployment inference-api -n mlops --replicas=10
+#
+# 7. Update configuration without redeploying:
+#    kubectl edit configmap mlops-config -n mlops
+#    kubectl rollout restart deployment/inference-api -n mlops
+#
+# 8. Monitor resource usage:
+#    kubectl top pods -n mlops
+#    kubectl top nodes
+#
+# 9. Delete everything:
+#    kubectl delete namespace mlops
+
+
+# ============================================================================
+# Production Enhancements (Not Shown for Educational Clarity)
+# ============================================================================
+#
+# 1. Redis for FEAST online store (fast in-memory cache)
+#    - Add Redis Deployment and Service
+#    - Update FEAST_ONLINE_STORE to point to Redis
+#
+# 2. Prometheus + Grafana for monitoring
+#    - ServiceMonitor resources for metrics collection
+#    - Custom dashboards for model performance
+#
+# 3. Network Policies for security
+#    - Restrict pod-to-pod communication
+#    - Only allow necessary connections
+#
+# 4. Resource Quotas per namespace
+#    - Prevent resource exhaustion
+#    - Ensure fair sharing across teams
+#
+# 5. PodDisruptionBudgets for high availability
+#    - Ensure minimum replicas during rolling updates
+#    - Prevent all pods being down simultaneously
+#
+# 6. Init Containers for dependencies
+#    - Wait for database to be ready before starting MLflow
+#    - Run database migrations before app starts
+#
+# 7. Secrets management with external vault
+#    - HashiCorp Vault or AWS Secrets Manager
+#    - Inject secrets at runtime, not stored in etcd
+#
+# 8. GitOps with ArgoCD or Flux
+#    - Declarative deployments from Git
+#    - Automatic sync when manifests change
+#
+# 9. Service Mesh (Istio/Linkerd)
+#    - Mutual TLS between services
+#    - Advanced traffic management and observability
+#
+# 10. Cost optimization
+#     - Node affinity for cheaper spot instances
+#     - Cluster autoscaler for dynamic sizing
+#     - Vertical Pod Autoscaler for right-sizing

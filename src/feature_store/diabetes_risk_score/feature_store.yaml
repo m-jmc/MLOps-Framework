@@ -1,0 +1,13 @@
+project: diabetes_model
+registry: 
+  path: data/registry.db
+  cache_ttl_seconds: 3600
+provider: local
+online_store:
+  type: sqlite
+  path: data/online_store.db
+entity_key_serialization_version: 2
+entities:
+  - name: member_id
+    join_keys: 
+      - member_id

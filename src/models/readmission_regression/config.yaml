@@ -1,0 +1,112 @@
+# Hospital Readmission Regression Model Configuration
+
+model:
+  name: "readmission_regression"
+  type: "regression"
+  description: "Predicts 30-day hospital readmission risk score (0-1 probability)"
+  version: "1.0.0"
+
+# MLflow Configuration
+mlflow:
+  experiment_name: "Hospital Readmission Prediction"
+  model_name: "readmission_risk_model"
+  tracking_uri: "sqlite:///src/mlruns/mlflow.db"
+
+# Feature Store Configuration
+feature_store:
+  feature_service: "readmission_features"
+  entity: "patient_id"
+
+# Data Configuration
+data:
+  target_column: "readmission_risk"
+  drop_columns:
+    - "patient_id"
+    - "month_key"
+    - "readmission_risk"
+    - "age_group"  # Used for bias analysis, not training
+
+# Training Configuration
+training:
+  test_size: 0.2
+  random_seed: 42
+  cv_folds: 5
+
+  # XGBoost Hyperparameters
+  xgboost:
+    objective: "reg:logistic"  # Bounded [0,1] output
+    eval_metric: "rmse"
+    max_depth: 5
+    learning_rate: 0.1
+    n_estimators: 100
+    subsample: 0.8
+    colsample_bytree: 0.8
+    early_stopping_rounds: 10
+
+  # Hyperparameter Optimization (Hyperopt)
+  hyperopt:
+    enabled: false  # Set to true for full implementation
+    max_evals: 50
+    search_space:
+      max_depth: [3, 10]
+      learning_rate: [0.01, 0.3]
+      n_estimators: [50, 300]
+      subsample: [0.6, 1.0]
+      colsample_bytree: [0.6, 1.0]
+
+# Evaluation Metrics
+evaluation:
+  primary_metric: "rmse"
+  metrics:
+    - rmse  # Root Mean Squared Error
+    - mae   # Mean Absolute Error
+    - r2    # R-squared
+    - mape  # Mean Absolute Percentage Error
+
+  # Threshold for model promotion
+  promotion:
+    min_improvement: 0.05  # 5% RMSE reduction required
+
+# Bias Detection
+bias:
+  protected_attributes:
+    - sex
+    - age_group
+    - insurance_type
+  fairness_threshold: 0.1  # Max acceptable RMSE disparity
+
+# Model Card
+model_card:
+  auto_generate: true
+  template: "src/governance/templates/model_card_template.md"
+  output_path: "src/models/readmission_regression/MODEL_CARD.md"
+
+# Features
+features:
+  demographics:
+    - age
+    - sex
+    - insurance_type
+
+  index_admission:
+    - length_of_stay
+    - admission_type
+    - discharge_disposition
+    - num_procedures
+    - num_diagnoses
+
+  clinical_history:
+    - num_prior_admissions
+    - num_emergency_visits
+    - chronic_conditions
+    - num_medications
+    - medication_changes
+
+  lab_values:
+    - lab_result_1  # Placeholder
+    - lab_result_2
+    - lab_result_3
+
+  social_determinants:
+    - home_health_services
+    - social_support_score

@@ -1,0 +1,23 @@
+model:
+  name: "diabetes_risk_classifier"  # or "heart_disease_classifier"
+  version: "1.0.0"
+  algorithm: "xgboost"
+
+data:
+  target_column: "outcome"
+  entity_keys: ["patient_id", "month_key"]
+  drop_columns: ["event_timestamp", "created_date"]
+
+training:
+  test_size: 0.2
+  random_seed: 42
+  use_smote: true
+
+evaluation:
+  primary_metric: "roc_auc"
+  promotion:
+    min_improvement: 0.02
+
+bias:
+  enabled: true
+  protected_attributes: ["age_group", "sex", "ethnicity"]

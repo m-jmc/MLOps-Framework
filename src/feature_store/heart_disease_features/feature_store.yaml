@@ -1,0 +1,15 @@
+project: heart_disease_features
+registry:
+  path: data/registry.db
+  cache_ttl_seconds: 3600
+provider: local
+online_store:
+  type: sqlite
+  path: data/online_store.db
+offline_store:
+  type: file
+entity_key_serialization_version: 3
+entities:
+  - name: patient_id
+    join_keys:
+      - patient_id

@@ -1,0 +1,151 @@
+# Community Hospital MLOps Configuration
+# This configuration file centralizes all paths and settings for the MLOps platform
+
+# Project Metadata
+project:
+  name: "Community Hospital MLOps"
+  organization: "Community Hospital"
+  version: "1.0.0"
+  description: "Reference MLOps platform for healthcare ML models"
+
+# Model Registry Configuration (MLflow)
+model_registry:
+  backend_store_uri: "sqlite:///src/mlruns/mlflow.db"
+  default_artifact_root: "src/mlruns"
+  tracking_uri: "http://localhost:5000"
+
+# Feature Store Configuration (FEAST)
+feature_store:
+  repo_path: "src/feature_store"
+  registry_path: "src/feature_store/data/registry.db"
+  online_store_path: "src/feature_store/data/online_store.db"
+
+# Inference Database Configuration
+inference_db:
+  path: "src/inference_db/inference_log.db"
+  table_name: "inference_log"
+
+# Data Paths
+data:
+  # Heart Disease Model Data
+  heart_disease:
+    base_data: "src/feature_store/heart_disease_features/data/base_data"
+    historical_data: "src/feature_store/heart_disease_features/data/historical_data_sample"
+    entity_data: "src/feature_store/heart_disease_features/data/entity_data_sample"
+    label_data: "src/feature_store/heart_disease_features/data/label_data"
+
+  # Hospital Readmission Model Data (Placeholder)
+  readmission:
+    base_data: "src/feature_store/readmission_features/data/base_data"
+    historical_data: "src/feature_store/readmission_features/data/historical_data_sample"
+    entity_data: "src/feature_store/readmission_features/data/entity_data_sample"
+    label_data: "src/feature_store/readmission_features/data/label_data"
+
+# Model-Specific Configuration
+models:
+  heart_disease:
+    name: "heart_disease_classifier"
+    type: "classification"
+    experiment_name: "Heart Disease Classification"
+    feature_service: "heart_disease_features"
+    target_column: "heart_disease"
+    drop_columns:
+      - "patient_id"
+      - "month_key"
+      - "heart_disease"
+
+  readmission:
+    name: "readmission_regression"
+    type: "regression"
+    experiment_name: "Hospital Readmission Prediction"
+    feature_service: "readmission_features"
+    target_column: "readmission_risk"
+    drop_columns:
+      - "patient_id"
+      - "month_key"
+      - "readmission_risk"
+
+# Training Configuration
+training:
+  random_seed: 42
+  test_size: 0.2
+  cv_folds: 5
+  hyperopt_max_evals: 50
+
+  # XGBoost Default Hyperparameters
+  xgboost_defaults:
+    objective: "binary:logistic"
+    eval_metric: "auc"
+    early_stopping_rounds: 10
+
+# Monitoring Configuration
+monitoring:
+  drift_detection:
+    enabled: true
+    threshold: 0.1
+    schedule: "weekly"  # Options: daily, weekly, monthly
+    reference_window_days: 30
+    comparison_window_days: 7
+
+  bias_detection:
+    enabled: true
+    protected_attributes:
+      - "sex"
+      - "age_group"
+    fairness_threshold: 0.1  # Max acceptable disparity
+
+  lineage_tracking:
+    enabled: true
+    log_dataset_hash: true
+    log_feature_versions: true
+
+# Governance Configuration
+governance:
+  approval_workflow:
+    enabled: true
+    require_manual_approval: true
+    min_performance_improvement: 0.02  # 2% improvement required
+    max_bias_disparity: 0.1
+
+  audit_logging:
+    enabled: true
+    log_path: "src/governance/audit_log.db"
+
+  model_cards:
+    auto_generate: true
+    template_path: "src/governance/templates/model_card_template.md"
+
+# Dashboard Configuration
+dashboard:
+  port: 8501
+  theme: "light"
+  cache_ttl: 300  # seconds
+
+# API Configuration (Optional - not implemented in v1.0)
+api:
+  enabled: false
+  port: 8000
+
+# CI/CD Configuration
+cicd:
+  pre_commit:
+    enabled: true
+    hooks:
+      - black
+      - flake8
+      - isort
+      - mypy
+      - data_validation
+
+  github_actions:
+    enabled: true
+    python_versions:
+      - "3.9"
+      - "3.10"
+      - "3.11"
+
+# Logging Configuration
+logging:
+  level: "INFO"  # Options: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "logs/mlops.log"

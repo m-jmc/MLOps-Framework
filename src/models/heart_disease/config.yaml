@@ -1,0 +1,122 @@
+# Heart Disease Classification Model Configuration
+
+model:
+  name: "heart_disease_classifier"
+  type: "classification"
+  description: "Binary classification model predicting presence of heart disease"
+  version: "1.0.0"
+
+# MLflow Configuration
+mlflow:
+  experiment_name: "Heart Disease Classification"
+  model_name: "heart_disease_model"
+  tracking_uri: "sqlite:///src/mlruns/mlflow.db"
+  registry_path: "src/mlruns"
+
+# Feature Store Configuration
+feature_store:
+  repo_path: "src/feature_store/heart_disease_features"
+  feature_service: "heart_disease_features"
+  entity: "patient_id"
+
+# Data Configuration
+data:
+  target_column: "heart_disease"
+  drop_columns:
+    - "patient_id"
+    - "month_key"
+    - "heart_disease"
+    - "age_group"
+    - "event_timestamp"
+
+# Training Configuration
+training:
+  test_size: 0.2
+  random_seed: 42
+  cv_folds: 5
+  use_smote: false  # Heart disease dataset is balanced
+
+  # XGBoost Hyperparameters
+  xgboost:
+    objective: "binary:logistic"
+    eval_metric: "auc"
+    max_depth: 5
+    learning_rate: 0.1
+    n_estimators: 200
+    subsample: 0.8
+    colsample_bytree: 0.8
+    early_stopping_rounds: 10
+
+  # Hyperparameter Optimization (Hyperopt)
+  hyperopt:
+    enabled: true
+    max_evals: 50
+    search_space:
+      max_depth: [3, 10]
+      learning_rate: [0.01, 0.3]
+      n_estimators: [100, 1000]
+      min_child_weight: [1, 10]
+      subsample: [0.5, 1.0]
+      colsample_bytree: [0.5, 1.0]
+
+# Evaluation Metrics
+evaluation:
+  primary_metric: "roc_auc"
+  metrics:
+    - roc_auc
+    - accuracy
+    - precision
+    - recall
+    - f1
+    - matthews_corrcoef
+
+  # Threshold for model promotion
+  promotion:
+    min_improvement: 0.02  # 2% AUC improvement required
+    min_auc: 0.75  # Minimum acceptable AUC
+
+# Bias Detection
+bias:
+  enabled: true
+  protected_attributes:
+    - sex          # 0=female, 1=male
+    - age_group    # young, middle, senior
+  fairness_metrics:
+    - demographic_parity
+    - equal_opportunity
+    - predictive_parity
+  fairness_threshold: 0.1  # Max acceptable disparity
+
+# Model Card
+model_card:
+  auto_generate: true
+  template: "src/governance/templates/model_card_template.md"
+  output_path: "src/models/heart_disease/MODEL_CARD.md"
+
+# Lineage Tracking
+lineage:
+  enabled: true
+  log_dataset_version: true
+  log_feature_version: true
+  log_code_version: true
+
+# Features (from UCI Heart Disease Dataset)
+features:
+  demographics:
+    - age            # Age in years
+    - sex            # 0=female, 1=male
+
+  clinical_measurements:
+    - resting_bp     # Resting blood pressure (mm Hg)
+    - cholesterol    # Serum cholesterol (mg/dl)
+    - max_heart_rate # Maximum heart rate achieved
+    - st_depression  # ST depression induced by exercise
+
+  cardiac_indicators:
+    - chest_pain_type    # 1-4 (1=typical angina, 4=asymptomatic)
+    - fasting_blood_sugar # >120 mg/dl (0=false, 1=true)
+    - resting_ecg        # Resting ECG results (0-2)
+    - exercise_angina    # Exercise induced angina (0=no, 1=yes)
+    - slope              # Slope of peak exercise ST segment (0-2)
+    - vessels            # Number of major vessels (0-3)
+    - thalassemia        # 0=normal, 1=fixed defect, 2=reversable defect
